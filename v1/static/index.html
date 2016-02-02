@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kcore Database API</title>
+</head>
+<body>
+<h1>Kcore Database API</h1>
+
+<h2>To upload data</h2>
+
+<p>Please refer to the distributed submit script.</p>
+
+<h2>To download data</h2>
+<p>Get networks:<br>
+    <a href="http://134.74.76.229:8080/getnetworks?cut=30">http://134.74.76.229:8080/getnetworks?cut=30</a><br>
+"cut" is a data cutoff option in days, default 30 days.</p>
+
+<p>Get influencers of a network:<br>
+    <a href="http://134.74.76.229:8080/get?keyword=global%20warming">http://134.74.76.229:8080/get?keyword=global%20warming</a>
+</p>
+
+<p>Get history of a handler in a network:<br>
+    <a href="http://134.74.76.229:8080/gethistory?keyword=global%20warming&handler=@evanderburg">http://134.74.76.229:8080/gethistory?keyword=global%20warming&handler=@evanderburg</a>
+</p>
+
+<p>Get queued keywords in recent to old order:<br>
+    <a href="http://134.74.76.229:8080/queued?cut=30">http://134.74.76.229:8080/queued?cut=30</a><br>
+"cut" is a data cutoff option in days, default 30 days.
+</p>
+
+<p>Get hottest search keywords in high to low order:<br>
+    <a href="http://134.74.76.229:8080/hottest?cut=30&limit=10">http://134.74.76.229:8080/hottest?cut=30&limit=10</a><br>
+"cut" is a data cutoff option in days, default 30 days. "limit" is maximum number of items returned.
+</p>
+
+</body>
+</html>
