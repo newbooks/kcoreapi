@@ -19,6 +19,11 @@ indexes:
 - kind: Influencer
   properties:
   - name: keyword
+  - name: rank
+
+- kind: Influencer
+  properties:
+  - name: keyword
   - name: received
   - name: rank
 

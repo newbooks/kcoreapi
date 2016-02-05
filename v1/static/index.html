@@ -14,24 +14,19 @@
 <h2>To download data</h2>
 <p>Get networks:<br>
     <a href="http://134.74.76.229:8080/getnetworks?cut=30">http://134.74.76.229:8080/getnetworks?cut=30</a><br>
-"cut" is a data cutoff option in days, default 30 days.</p>
+<ul><li>"cut" is a data cutoff option in days, default 30 days.</li>
+<li>Returned networks are calculated within cutoff days.</li>
+<li>Statistics such as last visited time and clicks are those within cutoff days</li></ul></p>
 
 <p>Get influencers of a network:<br>
     <a href="http://134.74.76.229:8080/get?keyword=global%20warming">http://134.74.76.229:8080/get?keyword=global%20warming</a>
-</p>
-
-<p>Get history of a handler in a network:<br>
-    <a href="http://134.74.76.229:8080/gethistory?keyword=global%20warming&handler=@evanderburg">http://134.74.76.229:8080/gethistory?keyword=global%20warming&handler=@evanderburg</a>
-</p>
+<ul><li>If you know network name, use this to get the network information.</li></ul></p>
 
 <p>Get queued keywords in recent to old order:<br>
     <a href="http://134.74.76.229:8080/queued?cut=30">http://134.74.76.229:8080/queued?cut=30</a><br>
-"cut" is a data cutoff option in days, default 30 days.
-</p>
-
-<p>Get hottest search keywords in high to low order:<br>
-    <a href="http://134.74.76.229:8080/hottest?cut=30&limit=10">http://134.74.76.229:8080/hottest?cut=30&limit=10</a><br>
-"cut" is a data cutoff option in days, default 30 days. "limit" is maximum number of items returned.
+<ul><li>"cut" is a data cutoff option in days, default 30 days.</li>
+    <li>This is a convenience function that returns a simple list for dataminer.</li>
+    <li>To get full statistics, use getnetworks.</li></ul>
 </p>
 
 </body>

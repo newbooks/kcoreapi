@@ -32,7 +32,9 @@ if __name__ == "__main__":
         if rank <= RANK_LIMIT:
             entity = {"rank": rank,
                       "influencer": fields[1],
-                      "connections": fields[2]}
+                      "connections": fields[2],
+                      "collective_influence": fields[3],
+                      "magnification": fields[4]}
             influencers.append(entity)
 
     if not keyword:

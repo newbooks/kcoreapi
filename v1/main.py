@@ -3,17 +3,17 @@
 import webapp2
 import json
 from google.appengine.ext import db
-import logging
 import time
 import operator
-from collections import Counter
+from datetime import datetime, timedelta
+import logging
 
 CUTOFF = 30  # cutoff time for retrieving queued keywords in days
 LIMIT = 10  # limit of counted recent searches
 
 
-def str_clean(str):
-    return " ".join(str.split()).lower()
+def str_clean(s):
+    return " ".join(s.split()).lower()
 
 
 def remove_duplicates(values):
@@ -27,23 +27,30 @@ def remove_duplicates(values):
             seen.add(value)
     return output
 
+
 class Network(db.Model):
     keyword = db.StringProperty(required=True)
-    received = db.IntegerProperty(required=True)
+    updated = db.DateTimeProperty(auto_now=True)
 
 
 class Influencer(db.Model):
     keyword = db.StringProperty(required=True)
-    received = db.IntegerProperty(required=True)
     handler = db.StringProperty(required=True)
     rank = db.IntegerProperty(required=True)
-    connections = db.IntegerProperty(required=True)
-    ci = db.FloatProperty(required=False)
+    connections = db.IntegerProperty(required=False)
+    collective_influence = db.FloatProperty(required=False)
+    magnification = db.FloatProperty(required=False)
 
 
 class Keyword(db.Model):
     keyword = db.StringProperty(required=True)
-    visited = db.IntegerProperty(required=True)
+    last_visited = db.DateTimeProperty(auto_now=True)
+
+
+class ClickCounters(db.Model):
+    keyword = db.StringProperty(required=True)
+    day = db.DateProperty(required=True)
+    n = db.IntegerProperty(required=True)
 
 
 class Post(webapp2.RequestHandler):
@@ -58,24 +65,38 @@ class Post(webapp2.RequestHandler):
         keyword = str_clean(data["keyword"])
         influencers = data["influencers"]
 
+        # Check if this is an update or a new calculation, update network
+        q = Network.all()
+        q.filter("keyword =", keyword)
+        networks = list(q.run(limit=1))  # Only one record for one keyword
+        if networks:
+            record = networks[0]
+        else:
+            record = Network(keyword=keyword)
+        record.put()
+
+        # delete any existing influencer with this keyword
+        q = Influencer.all()
+        q.filter("keyword =", keyword)
+        records = list(q.run())
+        for record in records:
+            record.delete()
+
+        # save new influencers
         for influencer in influencers:
             handler = str_clean(influencer["influencer"])
             rank = int(influencer["rank"])
             connections = int(influencer["connections"])
-            ci = float(influencer["connections"])
+            collective_influence = float(influencer["collective_influence"])
+            magnification = float(influencer["magnification"])
             a = Influencer(keyword=keyword,
                            received=received,
                            handler=handler,
                            rank=rank,
                            connections=connections,
-                           ci=ci)
-            try:
-                a.put()
-            except:
-                self.response.out.write("Error in storing entry %s to database." % handler)
-        # save this network to database
-        b = Network(keyword=keyword, received=received)
-        b.put()
+                           collective_influence=collective_influence,
+                           magnification=magnification)
+            a.put()
 
 
 class Get(webapp2.RequestHandler):
@@ -85,16 +106,14 @@ class Get(webapp2.RequestHandler):
         if keyword:
             q = Network.all()
             q.filter("keyword =", keyword)
-            q.order('-received')
             networks = list(q.run(limit=1))
             if networks:
                 network = networks[0]
                 output_json = {"keyword": network.keyword,
-                               "received": network.received}
+                               "received": str(network.updated)}
 
                 q = Influencer.all()
                 q.filter("keyword =", keyword)
-                q.filter("received =", networks[0].received)
                 q.order("rank")
                 # output as json
                 influencers = list(q.run())
@@ -105,82 +124,96 @@ class Get(webapp2.RequestHandler):
                     influencer_json["handler"] = influencer.handler
                     influencer_json["rank"] = influencer.rank
                     influencer_json["connections"] = influencer.connections
+                    influencer_json["collective_influence"] = influencer.collective_influence
+                    influencer_json["magnification"] = influencer.magnification
+
                     influencers_json.append(influencer_json)
 
-                # record this visit if this network exists
-                t = int(time.time())
-                a = Keyword(keyword=keyword, visited=t)
-                a.put()
+                # record this visit in Keywords and ClickCounters if this network exists
+                # update keyword visit time (auto add so there is no explicit set)
+                q = Keyword.all()
+                q.filter("keyword =", keyword)
+                keywords = list(q.run(limit=1))
+                if keywords:
+                    record = keywords[0]
+                else:
+                    record = Keyword(keyword=keyword)
+                record.put()
+
+                # update counters
+                q = ClickCounters.all()
+                day = datetime.now().date()
+                q.filter("day =", day)
+                q.filter("keyword =", keyword)
+                records = list(q.run(limit=1))
+                if records:
+                    record = records[0]
+                    record.n += 1
+                else:
+                    record = ClickCounters(keyword=keyword, day=day, n=1)
+                record.put()
 
                 output_json["influencers"] = influencers_json
                 output_string = json.dumps(output_json)
                 self.response.headers.add_header("Content-Type", "application/json; charset=UTF-8")
                 self.response.out.write(output_string)
 
-        else: # no keywork no search
+        else:  # no keyword no search
             self.response.out.write("No keyword, no search.")
-
-
-class GetHistory(webapp2.RequestHandler):
-    def get(self):
-        keyword = self.request.get("keyword")
-        handler = self.request.get("handler")
-        if keyword and handler:
-            q = Influencer.all()
-            q.filter("keyword =", keyword)
-            q.filter("handler =", handler)
-            q.order("received")
-
-            handler_history = list(q.run())
-            history_json = []
-            for h in handler_history:
-                history = dict()
-                history["received"] = h.received
-                history["rank"] = h.rank
-                history_json.append(history)
-
-            output_json = {"keyword": keyword,
-                           "handler": handler,
-                           "history": history_json}
-            output_string = json.dumps(output_json)
-            self.response.headers.add_header("Content-Type", "application/json; charset=UTF-8")
-            self.response.out.write(output_string)
-        else:
-            self.response.out.write("Require keyword and handler to search.")
 
 
 class GetNetworks(webapp2.RequestHandler):
     def get(self):
-        cut = self.request.get("cut")
+        cut = float(self.request.get("cut"))
         if cut:
-            cut_seconds = int(86400*float(cut))
+            d = datetime.now() - timedelta(days=cut)
         else:
-            cut_seconds = int(86400*CUTOFF)
+            d = datetime.now() - timedelta(days=CUTOFF)
 
         q = Network.all()
-        time_cut = int(time.time()) - cut_seconds
-        q.filter("received >", time_cut)
+        q.filter("updated >", d)
         networks = list(q.run())
         keywords = [x.keyword for x in networks]
-        keywords = list(set(keywords))
-        #logging.info("keywords)
-        output_string = json.dumps(keywords)
+        all_networks = {}
+
+        # load calculated networks
+        for network in networks:
+            all_networks[network.keyword] = {"keyword": network.keyword,
+                 "updated": int((datetime.now() - network.updated).total_seconds()),
+                 "clicks": 0,
+                 "visited": "Never"}
+
+        # load visited time
+        q = Keyword.all()
+        q.filter("last_visited >", d)
+        networks = list(q.run())
+        for network in networks:
+            all_networks[network.keyword]["visited"] = int((datetime.now() - network.last_visited).total_seconds())
+
+        # load clicks
+        q = ClickCounters.all()
+        q.filter("day >=", d)
+        networks = list(q.run())
+        for network in networks:
+            if network.keyword in all_networks:
+                all_networks[network.keyword]["clicks"] += network.n
+
+        output_string = json.dumps(all_networks)
         self.response.headers.add_header("Content-Type", "application/json; charset=UTF-8")
         self.response.out.write(output_string)
 
 
 class Queued(webapp2.RequestHandler):
     def get(self):
-        cut = self.request.get("cut")
+        cut = float(self.request.get("cut"))
         if cut:
-            cut_seconds = int(86400*float(cut))
+            d = datetime.now() - timedelta(days=cut)
         else:
-            cut_seconds = int(86400*CUTOFF)
+            d = datetime.now() - timedelta(days=CUTOFF)
 
         q = Keyword.all()
-        time_cut = int(time.time()) - cut_seconds
-        q.filter("visited >", time_cut)
-        q.order("-visited")
+        q.filter("last_visited >", d)
+        q.order("-last_visited")
         networks = list(q.run())
         keywords = [x.keyword for x in networks]
         #logging.warning(repr(keywords))
@@ -191,49 +224,20 @@ class Queued(webapp2.RequestHandler):
         self.response.out.write(output_string)
 
     def post(self):
-        keyword = self.request.get("keyword")
-        t = int(time.time())
-        a = Keyword(keyword=keyword, visited=t)
-        a.put()
-
-
-class Hottest(webapp2.RequestHandler):
-    def get(self):
-        limit = self.request.get("limit")
-        if limit:
-            limit = int(limit)
-        else:
-            limit = LIMIT
-
-        cut = self.request.get("cut")
-        if cut:
-            cut_seconds = int(86400*float(cut))
-        else:
-            cut_seconds = int(86400*CUTOFF)
-
+        keyword = str_clean(self.request.get("keyword"))
         q = Keyword.all()
-        time_cut = int(time.time()) - cut_seconds
-        q.filter("visited >", time_cut)
-        networks = list(q.run())
-        keywords = [x.keyword for x in networks]
-        #logging.warning(repr(keywords))
-
-        keywords_dict = dict(Counter(keywords))
-        sorted_keywords = sorted(keywords_dict.items(), key=operator.itemgetter(1), reverse=True)
-        output = [x[0] for x in sorted_keywords]
-        output = output[:limit]
-
-        output_string = json.dumps(output)
-        self.response.headers.add_header("Content-Type", "application/json; charset=UTF-8")
-        self.response.out.write(output_string)
+        q.filter("keyword =", keyword)
+        keywords = list(q.run(limit=1))
+        if keywords:
+            record = keywords[0]
+        else:
+            record = Keyword(keyword=keyword)
+        record.put()
 
 
 app = webapp2.WSGIApplication([
     ('/post', Post),
     ('/get', Get),
-    ('/gethistory', GetHistory),
     ('/getnetworks', GetNetworks),
-    ('/queued', Queued),
-    ('/hottest', Hottest)
+    ('/queued', Queued)
 ], debug=True)
-
