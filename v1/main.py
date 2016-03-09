@@ -4,9 +4,8 @@ import webapp2
 import json
 from google.appengine.ext import db
 import time
-import operator
 from datetime import datetime, timedelta
-import logging
+from google.appengine.api import memcache
 
 CUTOFF = 30  # cutoff time for retrieving queued keywords in days
 LIMIT = 10  # limit of counted recent searches
@@ -26,6 +25,13 @@ def remove_duplicates(values):
             output.append(value)
             seen.add(value)
     return output
+
+
+def get_clickcounters(d):
+        q = ClickCounters.all()
+        q.filter("day >=", d)
+        networks = list(q.run())
+        return networks
 
 
 class Network(db.Model):
@@ -164,20 +170,22 @@ class Get(webapp2.RequestHandler):
 
 class GetNetworks(webapp2.RequestHandler):
     def get(self):
-        cut = float(self.request.get("cut"))
+        cut = self.request.get("cut")
         if cut:
-            d = datetime.now() - timedelta(days=cut)
+            d = datetime.now() - timedelta(days=float(cut))
         else:
             d = datetime.now() - timedelta(days=CUTOFF)
 
         q = Network.all()
         q.filter("updated >", d)
+        # Should put a number limit and sort by update time here
         networks = list(q.run())
         keywords = [x.keyword for x in networks]
         all_networks = {}
 
         # load calculated networks
         for network in networks:
+            # Should query clicks, visited and updated here one by one 
             all_networks[network.keyword] = {"keyword": network.keyword,
                  "updated": int((datetime.now() - network.updated).total_seconds()),
                  "clicks": 0,
@@ -188,26 +196,36 @@ class GetNetworks(webapp2.RequestHandler):
         q.filter("last_visited >", d)
         networks = list(q.run())
         for network in networks:
-            all_networks[network.keyword]["visited"] = int((datetime.now() - network.last_visited).total_seconds())
+            if network.keyword in all_networks:
+                all_networks[network.keyword]["visited"] = int((datetime.now() - network.last_visited).total_seconds())
+            else:
+                #all_networks[network.keyword] = {"keyword": network.keyword,
+                #     "updated": "Queued",
+                #     "clicks": 0,
+                #     "visited": "Never"}
+                pass
+
 
         # load clicks
-        q = ClickCounters.all()
-        q.filter("day >=", d)
-        networks = list(q.run())
+        networks = get_clickcounters(d)
         for network in networks:
             if network.keyword in all_networks:
                 all_networks[network.keyword]["clicks"] += network.n
 
-        output_string = json.dumps(all_networks)
+        data = []
+        for k in all_networks.keys():
+            data.append(all_networks[k])
+        output_string = json.dumps(data)
         self.response.headers.add_header("Content-Type", "application/json; charset=UTF-8")
+        self.response.headers.add_header("Access-Control-Allow-Origin", "*")
         self.response.out.write(output_string)
 
 
 class Queued(webapp2.RequestHandler):
     def get(self):
-        cut = float(self.request.get("cut"))
+        cut = self.request.get("cut")
         if cut:
-            d = datetime.now() - timedelta(days=cut)
+            d = datetime.now() - timedelta(days=float(cut))
         else:
             d = datetime.now() - timedelta(days=CUTOFF)
 
@@ -230,9 +248,11 @@ class Queued(webapp2.RequestHandler):
         keywords = list(q.run(limit=1))
         if keywords:
             record = keywords[0]
+            record.put()
+            self.response.out.write("exist")
         else:
             record = Keyword(keyword=keyword)
-        record.put()
+            record.put()
 
 
 app = webapp2.WSGIApplication([
