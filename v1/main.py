@@ -12,7 +12,7 @@ CUTOFF = 30  # cutoff time for retrieving queued keywords in days
 LIMIT = 10  # limit of counted recent searches
 Counter_key = "click_counter_list"
 Network_key = "networks"
-
+Lastvisited_key = "lastvisited"
 
 def str_clean(s):
     return " ".join(s.split()).lower()
@@ -65,6 +65,26 @@ def get_networks(d):
         memcache.add(Network_key, networks)
         logging.error("MEMCACHE INFO: networks from DB")
         return networks
+
+
+def get_lastvisited(d):
+    lastvisited = memcache.get(Lastvisited_key)
+    if lastvisited is not None:
+        logging.error("MEMCACHE INFO: lastvisited from Cache")
+        return lastvisited
+    else:
+        q = Keyword.all()
+        q.filter("last_visited >", d)
+        networks = list(q.run())
+        lastvisited = {}
+        for network in networks:
+            #logging.error(network.keyword)
+            lastvisited[network.keyword] = network.last_visited
+
+        memcache.add(Lastvisited_key, lastvisited)
+        logging.error("MEMCACHE INFO: lastvisited from DB")
+        return lastvisited
+
 
 
 class Network(db.Model):
@@ -147,6 +167,7 @@ class Get(webapp2.RequestHandler):
             q = Network.all()
             q.filter("keyword =", keyword)
             networks = list(q.run(limit=1))
+            # memcache for network of one keyword
             if networks:
                 network = networks[0]
                 output_json = {"keyword": network.keyword,
@@ -179,6 +200,11 @@ class Get(webapp2.RequestHandler):
                 else:
                     record = Keyword(keyword=keyword)
                 record.put()
+                # sync to cache
+                d = 30
+                lastvisited = get_lastvisited(d)
+                lastvisited[keyword] = datetime.now()
+                memcache.set(Lastvisited_key, lastvisited, 86400)
 
                 # update counters
                 q = ClickCounters.all()
@@ -232,19 +258,10 @@ class GetNetworks(webapp2.RequestHandler):
                  "visited": "Never"}
 
         # load visited time
-        q = Keyword.all()
-        q.filter("last_visited >", d)
-        networks = list(q.run())
-        for network in networks:
-            if network.keyword in all_networks:
-                all_networks[network.keyword]["visited"] = int((datetime.now() - network.last_visited).total_seconds())
-            else:
-                #all_networks[network.keyword] = {"keyword": network.keyword,
-                #     "updated": "Queued",
-                #     "clicks": 0,
-                #     "visited": "Never"}
-                pass
-
+        lastvisited = get_lastvisited(d)
+        for keyword in lastvisited:
+            if keyword in all_networks:
+                all_networks[keyword]["visited"] = int((datetime.now() - lastvisited[keyword]).total_seconds())
 
         # load clicks
         counters = get_clickcounters(d)
