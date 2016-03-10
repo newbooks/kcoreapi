@@ -6,10 +6,11 @@ from google.appengine.ext import db
 import time
 from datetime import datetime, timedelta
 from google.appengine.api import memcache
+import logging
 
 CUTOFF = 30  # cutoff time for retrieving queued keywords in days
 LIMIT = 10  # limit of counted recent searches
-
+Counter_key = "click_counter_list"
 
 def str_clean(s):
     return " ".join(s.split()).lower()
@@ -28,10 +29,26 @@ def remove_duplicates(values):
 
 
 def get_clickcounters(d):
+    t = datetime.now()
+    expiration = (datetime(*(t + timedelta(days=1)).timetuple()[:3]) - t).seconds
+    counters = memcache.get(Counter_key)
+    if counters is not None:
+        logging.error("From Cache")
+        return counters
+    else:
         q = ClickCounters.all()
         q.filter("day >=", d)
         networks = list(q.run())
-        return networks
+        counters = {}
+        for network in networks:
+            if network.keyword in counters:
+                counters[network.keyword] += network.n
+            else:
+                counters[network.keyword] = network.n
+
+        memcache.add(Counter_key, counters, expiration)
+        logging.error("From DB")
+        return counters
 
 
 class Network(db.Model):
@@ -158,6 +175,16 @@ class Get(webapp2.RequestHandler):
                 else:
                     record = ClickCounters(keyword=keyword, day=day, n=1)
                 record.put()
+                # sync to cache
+                d = 30
+                counters = get_clickcounters(d)
+                if keyword in counters:
+                    counters[keyword] += 1
+                else:
+                    counters[keyword] = 1
+                t = datetime.now()
+                expiration = (datetime(*(t + timedelta(days=1)).timetuple()[:3]) - t).seconds
+                memcache.set(Counter_key, counters, expiration)
 
                 output_json["influencers"] = influencers_json
                 output_string = json.dumps(output_json)
@@ -207,10 +234,10 @@ class GetNetworks(webapp2.RequestHandler):
 
 
         # load clicks
-        networks = get_clickcounters(d)
-        for network in networks:
-            if network.keyword in all_networks:
-                all_networks[network.keyword]["clicks"] += network.n
+        counters = get_clickcounters(d)
+        for keyword in counters.keys():
+            if keyword in all_networks:
+                all_networks[keyword]["clicks"] = counters[keyword]
 
         data = []
         for k in all_networks.keys():
