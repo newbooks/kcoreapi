@@ -11,6 +11,8 @@ import logging
 CUTOFF = 30  # cutoff time for retrieving queued keywords in days
 LIMIT = 10  # limit of counted recent searches
 Counter_key = "click_counter_list"
+Network_key = "networks"
+
 
 def str_clean(s):
     return " ".join(s.split()).lower()
@@ -33,7 +35,7 @@ def get_clickcounters(d):
     expiration = (datetime(*(t + timedelta(days=1)).timetuple()[:3]) - t).seconds
     counters = memcache.get(Counter_key)
     if counters is not None:
-        logging.error("From Cache")
+        logging.error("MEMCACHE INFO: counter from Cache")
         return counters
     else:
         q = ClickCounters.all()
@@ -47,8 +49,22 @@ def get_clickcounters(d):
                 counters[network.keyword] = network.n
 
         memcache.add(Counter_key, counters, expiration)
-        logging.error("From DB")
+        logging.error("MEMCACHE INFO: counter from DB")
         return counters
+
+
+def get_networks(d):
+    networks = memcache.get(Network_key)
+    if networks is not None:
+        logging.error("MEMCACHE INFO: networks from Cache")
+        return networks
+    else:
+        q = Network.all()
+        q.filter("updated >", d)
+        networks = list(q.run())
+        memcache.add(Network_key, networks)
+        logging.error("MEMCACHE INFO: networks from DB")
+        return networks
 
 
 class Network(db.Model):
@@ -97,6 +113,7 @@ class Post(webapp2.RequestHandler):
         else:
             record = Network(keyword=keyword)
         record.put()
+        memcache.delete(Network_key)
 
         # delete any existing influencer with this keyword
         q = Influencer.all()
@@ -203,13 +220,9 @@ class GetNetworks(webapp2.RequestHandler):
         else:
             d = datetime.now() - timedelta(days=CUTOFF)
 
-        q = Network.all()
-        q.filter("updated >", d)
-        # Should put a number limit and sort by update time here
-        networks = list(q.run())
-        keywords = [x.keyword for x in networks]
-        all_networks = {}
+        networks = get_networks(d)
 
+        all_networks = {}
         # load calculated networks
         for network in networks:
             # Should query clicks, visited and updated here one by one 
