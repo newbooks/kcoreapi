@@ -67,6 +67,38 @@ def get_networks(d):
         return networks
 
 
+def get_network_by_keyword(keyword):
+    # Ensure the keys always starts with MC_, not to accidentlally confilict with other keys
+    mkey = "MC_" + keyword
+    networks = memcache.get(mkey)
+    if networks is not None:
+        logging.error("MEMCACHE INFO: %s from Cache" % keyword)
+        return networks
+    else:
+        q = Network.all()
+        q.filter("keyword =", keyword)
+        networks = list(q.run(limit=1))
+        memcache.add(mkey, networks)
+        logging.error("MEMCACHE INFO: %s from DB" % keyword)
+        return networks
+
+
+def get_influencers(keyword):
+    mkey = "IN_" + keyword
+    influencers = memcache.get(mkey)
+    if influencers is not None:
+        logging.error("MEMCACHE INFO: influencers from Cache")
+        return influencers
+    else:
+        q = Influencer.all()
+        q.filter("keyword =", keyword)
+        q.order("rank")
+        influencers = list(q.run())
+        memcache.add(mkey, influencers)
+        logging.error("MEMCACHE INFO: influencers from DB")
+        return influencers
+
+
 def get_lastvisited(d):
     lastvisited = memcache.get(Lastvisited_key)
     if lastvisited is not None:
@@ -84,7 +116,6 @@ def get_lastvisited(d):
         memcache.add(Lastvisited_key, lastvisited)
         logging.error("MEMCACHE INFO: lastvisited from DB")
         return lastvisited
-
 
 
 class Network(db.Model):
@@ -133,7 +164,9 @@ class Post(webapp2.RequestHandler):
         else:
             record = Network(keyword=keyword)
         record.put()
-        memcache.delete(Network_key)
+        memcache.delete("MC_"+keyword)  # delete this network
+        memcache.delete("IN_"+keyword)  # delete influencers
+        memcache.delete(Network_key)    # also delete the list of networks
 
         # delete any existing influencer with this keyword
         q = Influencer.all()
@@ -164,20 +197,23 @@ class Get(webapp2.RequestHandler):
         keyword = str_clean(self.request.get("keyword"))
 
         if keyword:
-            q = Network.all()
-            q.filter("keyword =", keyword)
-            networks = list(q.run(limit=1))
-            # memcache for network of one keyword
+            networks = get_network_by_keyword(keyword)
+            #q = Network.all()
+            #q.filter("keyword =", keyword)
+            #networks = list(q.run(limit=1))
+
+            t1 = time.time()
             if networks:
                 network = networks[0]
                 output_json = {"keyword": network.keyword,
                                "received": str(network.updated)}
 
-                q = Influencer.all()
-                q.filter("keyword =", keyword)
-                q.order("rank")
-                # output as json
-                influencers = list(q.run())
+                #q = Influencer.all()
+                #q.filter("keyword =", keyword)
+                #q.order("rank")
+                #influencers = list(q.run())
+                influencers = get_influencers(keyword)
+
                 influencers_json = list()
                 #logging.info(influencers)
                 for influencer in influencers:
@@ -233,7 +269,8 @@ class Get(webapp2.RequestHandler):
                 output_string = json.dumps(output_json)
                 self.response.headers.add_header("Content-Type", "application/json; charset=UTF-8")
                 self.response.out.write(output_string)
-
+            t2 = time.time()
+            logging.error("Time lapse of getting influencers of a network = %.2f s" % (t2-t1))
         else:  # no keyword no search
             self.response.out.write("No keyword, no search.")
 
